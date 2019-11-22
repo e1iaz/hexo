@@ -5,6 +5,7 @@ categories: "Java"
 tags: ["Java"]
 ---
 刚开始没有想写this的，因为感觉这个很简单，但是后来看了后面的解释后，发现有一些细节需要注意的
+
 ```java
 public class Main {
     int petalCount = 0;
@@ -36,13 +37,15 @@ public class Main {
     }
 }
 ```
+
 结果是
 
-```cmd
+```shell
 Constructor w/ int arg only, petalCount=47
 String & int args
 default constructor (no args)
 petalCount = 47 s = initial value
 ```
+
 构造器Main(String s,int petals)表明，尽管可以用this调用一个构造器，但去不能调用两个，并且要将调用的构造器放到开始，否则会编译出错
 printPetalCount()表示，除了构造器外，编译器禁止在其他任何方法中调用构造器

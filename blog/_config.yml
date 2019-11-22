@@ -86,7 +86,10 @@ theme: matery
 # Deployment
 ## Docs: https://hexo.io/docs/deployment.html
 deploy:
-  type:
+  type: git
+  repo: https://github.com/ncabhd/ncabhd.github.io.git
+  branch: master
+  
   
 prism_plugin:
   mode: 'preprocess'    # realtime/preprocess

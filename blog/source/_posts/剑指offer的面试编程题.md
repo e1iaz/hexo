@@ -4,8 +4,11 @@ date: 2019-09-04 17:25:30
 categories: "算法"
 tags: ["算法", "Java"]
 ---
+
 ## 实现Singleton模式
+
 懒汉模式
+
 ```java
 public class Singleton {
     private static Singleton singleton;
@@ -24,10 +27,12 @@ public class Singleton {
     }
 }
 ```
+
 饿汉模式
+
 ```java
 public class Singleton {
-    //饿汉模式    
+    //饿汉模式
     private static Singleton singleton = new Singleton();
     private Singleton() {
         System.out.println("饿汉模式");
@@ -37,9 +42,11 @@ public class Singleton {
     }
 }
 ```
+
 ## 二维数组中的查找
 
 要从右上或左下进行查找
+
 ```java
 public static boolean find() {
     int[][] a = {{1, 2, 8, 9}, {2, 4, 9, 12}, {4, 7, 10, 13}, {6, 8, 11, 15}};
@@ -63,8 +70,11 @@ public static boolean find() {
     return found;
 }
 ```
+
 ## 从尾到头打印链表
+
 链表
+
 ```java
 public static void printList() {
     ListNode list;
@@ -78,8 +88,11 @@ public static void printList() {
     }
 }
 ```
+
 ## 重建二叉树
+
 根据前序和中序重构二叉树，有个规律就是前序的第一个为root节点，中序root节点的左边是左子树，右边是右子树
+
 ```java
 public static ListNode tree(int[] qian, int qHead, int qTail, int[] zhong, int zHead, int zTail) {
     ListNode root = new ListNode(qian[qHead]);
@@ -112,9 +125,12 @@ public static ListNode tree(int[] qian, int qHead, int qTail, int[] zhong, int z
     return root;
 }
 ```
+
 ## 二叉树的下一个节点
+
 给定二叉树和其中一个节点，如何找出中序遍历的下一个节点。
 很巧妙的从左节点开始，先判断该节点有没有右节点，没有一直向上走
+
 ```java
 public static ListNode tree(ListNode node) {
     ListNode next = null;
@@ -138,16 +154,23 @@ public static ListNode tree(ListNode node) {
 ```
 
 ## 斐波那契问题
+
 ### 青蛙台阶问题
+
 一只青蛙一次可以跳上1级台阶，也可以跳2级台阶，求青蛙跳上一个n级台阶总共的跳法。
 我们将n级台阶当成n的函数，当$ n > 2 $时，第一次跳有两种选择，跳1级，此时跳法数目等于后面剩下的$ n - 1$级的跳法数目，即$f(n-1)$；跳2级，此时跳法数目等于后面剩下的$n-2$级的跳法数目，即$f(n-2)$。因此n级台阶的不同跳法是$f(n) = f(n-1) + f(n-2)$。
 如果条件改成，一只青蛙一次可以跳上1级台阶，也可以跳上2级……也可以跳上n级，跳法总数为$f(n) = 2^{n-1}$
+
 ### 矩形填充问题
+
 用2x1的小矩形横着或竖着去覆盖更大的矩形，请问8个2x1的小矩形无重叠地覆盖一个2x8的大矩形，共有多少种方法？
 竖着放的时候，右边还剩2x7的区域，横着放的时候，右边还剩2x6的区域，$f(8) = f(7) + f(6)$
+
 ## 旋转数组的最小数字
+
 将要给有序的数组的前若干个元素搬到数组末尾，找出最小的元素
 二分法，首先定义两个指针，第一位和最后一位，正常情况下是`num[0] >= nums[last]`，然后和中间的`nums[mid]`对比，如果第一位比mid大，说明最小的在前一半，`last = mid`，继续对比。
+
 ```java
 public static int findMin(int[] nums) {
     int mmin = nums[0];
