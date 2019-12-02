@@ -286,7 +286,105 @@ GET /_search?q=date:2014            # 0 results
 
 造成结果不同的就是类型的问题，可以使用`GET /index/type/tweet`查看，date字段的映射是date类型，而_all是text类型
 
-#### 精确值 VS 全文
+#### 倒排索引
+
+倒排索引之前已经写过了，是由文档中所有不重复词的列表构成，对于每个词都有一个包含它的文档列表。  
+假设有两个文档`The quick brown fox jumped over the lazy dog`和`Quick brown foxes leap over lazy dogs in summer`。如果我们搜索`quick brown`则两个文档都有，只是第一个文档的包含两个，第二个文档只包含了`brown`，所以第一个文档匹配度更高。但是这样的倒排索引有些问题，比如`Quick`和`quick`可以是相同的词，`fox`和`foxes`是相似的，`jumped`和`leap`意思相近，因此如果搜索`Quick fox`就不会出现任何文档。所以我们要将倒排索引重构，根据一定的规则，让它更符合全文搜索而不是精准查询。
+
+#### 分析和分析器
+
+如果只有倒排归类好了，没有分析，查询`leap`可能就会没有返回。所以存在分析，首先将一块文本分成适合于倒排索引的词条，之后将这些词条统一化为标准格式。  
+分析器实际上就是将三个功能封装到一个包里：字符过滤器、分词器、Token过滤器。字符过滤器，在分词前整理字符串，比如去掉HTML，把&转为and；分词器是将字符串分为单个词条，像是jieba分词；Tonken过滤器，会改变词条，比如转为小写，去掉无关词条(a, and, or)，增加词条，比如leap转为jump。  
+elasticsearch内置了一些分析器，拿个字符串举例`"Set the shape to semi-transparent by calling set_trans(5)"`
+
+- 标准分析器，默认使用的分析器，根据[Unicode 联盟](http://www.unicode.org/reports/tr29/)定义单词划分文本，删除大部分标点，然后小写`set, the, shape, to, semi, transparent, by, calling, set_trans, 5`
+- 简单分析器，在任何不是字母的地方分割文本，小写`set, the, shape, to, semi, transparent, by, calling, set, trans`
+- 空格分析器，在空格的地方划分文本`Set, the, shape, to, semi-transparent, by, calling, set_trans(5)`
+- 语言分析器，针对指定语言的特点设计的分析器，比如英语分析器附带一组无用词，它们会删除，是词条更符合英语语法`set, shape, semi, transpar, call, set_tran, 5`
+
+不是所有情况都需要分析器的，要是查询精确值就不会分析字符串。  
+可以使用`analyze`API查看文本是如何分析的
+
+```bash
+curl -X GET 'http://localhost:9200/_analyze' -d '
+{
+    "analyzer" : "standard",
+    "text" : "Text to analyze"
+}
+```
+
+#### 映射
+
+映射类似于MySQL的schema，它包含了字段、类型等信息。当索引一个包含新域的文档，elasticsearch会使用动态映射，即通过JSON中基本数据类型尝试猜测域类型。  
+在首次创建一个索引的时候，可以指定类型的映射，也可以为新类型增加映射，或者为已存在的类型更新映射。但是不能修改存在的域映射，如果一个域的映射已经存在，那么该域的数据可能已经被索引，如果修改这个域的映射，索引的数据可能出错，不能被正常搜索。  
+这段看的有些蒙，附上原版  
+>You can specify the mapping for a type when you first create an index. Alternatively, you can add the mapping for a new type (or update the mapping for an existing type) later, using the /_mapping endpoint.  
+>Although you can add to an existing mapping, you can’t change existing field mappings. If a mapping already exists for a field, data from that field has probably been indexed. If you were to change the field mapping, the indexed data would be wrong and would not be properly searchable.
+
+结合返回的参数来看
+
+```json
+"first_name" : {
+    "type" : "text",
+    "fields" : {
+        "keyword" : {
+            "type" : "keyword",
+            "ignore_above" : 256
+        }
+    }
+}
+```
+
+type指的text，而域是指的text下的fields。elasticsearch的专有名词，一直，很迷。
+
+#### 复杂核心域类型
+
+键值对有的时候并不是简单类型key-value，它的value可能是空可能是数组也有可能是个对象。  
+如果是多值域的话是以数组的形式存储的`{ "tag" : ["search" , "nosql"]}`。数组内所有值必须是相同数据类型的，如果通过索引来创建新的域，elasticsearch会用数组中第一个值的数据类型作为这个域的类型。数组是可以被搜索的，但不是像Java中的数组那样是有序的，在搜索的时候不能指定第几个值，更像是袋子里的值。  
+空域，Lucene中是不能存null的，所以认为存在null值的域为空域，不会被索引。  
+多层级对象，比如
+
+```json
+"user": {
+    "id":           "@johnsmith",
+    "gender":       "male",
+    "age":          26,
+    "name": {
+        "full":     "John Smith",
+        "first":    "John",
+        "last":     "Smith"
+    }
+}
+```
+
+name写的就是一个对象，其`properties`属性`type`显示为`object`。但是在lucene中是不理解对象的概念，elasticsearch为了有效的所以内部，会把文档转换为
+
+```json
+"user.id":          [@johnsmith],
+"user.gender":      [male],
+"user.age":         [26],
+"user.name.full":   [john, smith],
+"user.name.first":  [john],
+"user.name.last":   [smith]
+```
+
+如果是对象是数组的话
+
+```json
+{
+    "followers": [
+        { "age": 35, "name": "Mary White"},
+        { "age": 26, "name": "Alex Jones"},
+        { "age": 19, "name": "Lisa Smith"}
+    ]
+}
+{
+    "followers.age":    [19, 26, 35],
+    "followers.name":   [alex, jones, lisa, smith, mary, white]
+}
+```
+
+显然age和name的相关性已经丢失了，所以我们只能搜索到`有一个26岁的追随者`，而不能得到`是否有一个26岁名字叫Alen Jones的追随者`。
 
 ## 书中疑问自己找的
 
@@ -304,6 +402,13 @@ PUT是幂等方法，用于替换；POST是非幂等方法，用于创建。
 新建、索引和清楚都是写操作，它们必须在主分片上成功完成才能复制到相关的副本分片上。  
 副本分片负责容错，以及承担读请求的负载均衡。  
 待补充
+
+### 一个概念
+
+- 索引，相当于库
+- 文档，相当于一行数据
+- 类型，相当于表
+- 域，相当于字段
 
 ## 疑问
 
