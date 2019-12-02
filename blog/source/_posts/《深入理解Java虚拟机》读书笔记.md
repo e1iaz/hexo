@@ -1,3 +1,10 @@
+---
+title: 《Elasticsearch权威指南》读书笔记
+date: 2019-11-25 17:25:30
+categories: ["Java", "读书笔记"]
+tags: ["Java", "Java虚拟机", "读书笔记"]
+---
+
 # 《深入理解Java虚拟机》
 
 ## 第一部分 走进Java
