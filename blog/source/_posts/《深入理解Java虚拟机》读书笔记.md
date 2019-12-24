@@ -187,6 +187,303 @@ PromotedObject*:29 ------>| promo_bits:3 ----->| (CMS promoted object)
 第三部分对齐是为了保证内存对齐，hotspot要求对象的起始位置8字节的整数倍，如果一个对象大小不满足8N，就需要对齐填充补全。  
 > 这里的对象最好理解成只有基础类型的会好理解很多
 
-###### 对象的访问定位
+##### 对象的访问定位
 
 创建完对象后，Java可以根据栈上的reference数据来操作堆上的具体对象`SET_STACK_OBJECT(result, 0);`因为只是一个地址，所以具体怎么读，读到什么有虚拟机来确定，主流是句柄和直接指针，hotspot使用直接指针。句柄是需要维护一个句柄池，池中有对象实例数据的指针和类型的指针，reference指向的是句柄地址；直接指针是存储Java堆的地址，然后在Java堆中存放对象类型数据。句柄的好处是对象移动时只会改变句柄中的实例指针，而reference不需要改变；直接指针的好处是速度快，节省了一次指针定位的时间。
+
+#### 实战OutOfMemoryError
+
+在Java命令加入一些配置  
+|命令|含义|  
+|--|--|
+|-verbose:gc|输出虚拟机GC的详细情况|
+|-Xms20M|堆最小内存20M|
+|-Xmx20M|堆最大内存20M|
+|-Xmn10M|年轻代10M|
+|-XX:+PrintGCDetails|打印GC信息|
+|-XX:SurvivorRatio=8|Eden占新生代的8/10|
+
+>-XX:SurvivorRatio=n表示Eden : Survivor = n:1，Eden占 n/(n+2)
+
+##### Java堆溢出
+
+Java堆是存放对象实例的，只要不断创建对象实例，并保证GC Roots到对象之间有可达路径避免被回收，就可以实现Java堆溢出。  
+使用-XX:+HeapDumpOnOutOfMemoryError可以让虚拟机出现内存溢出是Dump出当前的内存转储快照以便之后分析。当出现问题后就可以根据快照进行分析，其主要是确定内存中的对象是否是必须的，也就是要区分是内存泄漏(Memeory Leak)还是内存溢出(Memory Overflow)。
+分析快照的软件书中推荐的是MAT，但是要在eclipse，所以我使用JProfiler。  
+
+```java
+/**
+ * VM Args:- Xms20m -Xmx20m -XX:HeapDumpOnOutOfMemoryError
+ */
+static class OOMObject {
+}
+public static void main(String[] args) {
+    List<OOMObject> list = new ArrayList<>();
+    while(true) {
+        list.add(new OOMObject());
+    }
+}
+```
+
+![image.png](https://i.loli.net/2019/12/14/iAZzYBf6NpWRgoC.png)  
+可以很清晰，这个Object数组占用了极高的内存，然后查看这个对象到GC Roots的引用链，查找对象是如何与GC Roots相关联而不被回收掉的  
+![image.png](https://i.loli.net/2019/12/14/FHGqKudacBpswv9.png)
+如果不是内存泄漏，意味着所有对象都必须存活，这个时候查看是否需要调整-Xmx和-Xms，物理内存是否可以再调大一些；检查对象的生命周期是否过长。
+
+##### 虚拟机栈和本地方法栈溢出
+
+在hotspot中并不区分虚拟机栈和本地方法栈，虽然后-Xoss设置本地方法栈的参数，但是是无效的，只能通过-Xss来定义。  
+Java虚拟机规范中描述了两种异常：栈深度大于虚拟机允许的最大深度，抛出StackOverflowError；虚拟机扩展本地方法栈的时候无法申请到足够的空间，抛出OutOfMemory异常。下面的方法抛出SOF  
+
+```c++
+/**
+ * VM args: -Xss180k
+  * 书中是128k，现在最小是180k了
+ */
+private int stackLength = 1;
+public void stackLeak() {
+    stackLength++;
+    stackLeak();
+}
+public static void main(String[] args) {
+    JavaVMStackSOF oom = new JavaVMStackSOF();
+    try {
+        oom.stackLeak();
+    } catch (Throwable e) {
+        System.out.println("stack length:" + oom.stackLength);
+        throw e;
+    }
+}
+```
+
+书中说在单线程下无法抛出OOM，在多线程下可以抛出OOM。32位Windows是下每个进程用户可以内存为2G，本地方法栈大小为2G - Xmx - MaxPermSize。这就意味着，每个线程分配的栈容量大，则创建的线程数就变少，如果无法修改栈容量，可以减少堆容量来为多线程分配更多内存空间。  
+多线程溢出确实会造成Windows假死，而Linux下不会，书上说12章回讲。  
+
+>OutOfMemeory书中写的不是很好，在Oracle的虚拟机规范中是这么写的
+>
+>- If the computation in a thread requires a larger Java Virtual Machine stack than is permitted, the Java Virtual Machine throws a   StackOverflowError.  
+>- If Java Virtual Machine stacks can be dynamically expanded, and expansion is attempted but insufficient memory can be made available to effect the expansion, or if insufficient memory can be made available to create the initial Java Virtual Machine stack for a new thread, the Java Virtual 
+Machine throws an OutOfMemoryError.  
+>
+>翻译过来是  
+>
+>- 如果线程中的计算所需的Java虚拟机堆栈超出允许的范围，则Java虚拟机将抛出StackOverflowError。  
+>- 如果可以动态扩展Java虚拟机堆栈，并且尝试进行扩展，但是没有足够的内存来实现扩展，或者如果没有足够的内存来为新线程创建初始Java虚拟机堆栈，则Java虚拟机机器抛出一个OutOfMemoryError。  
+>
+>[Java虚拟机规范(Java Virtual Machine Specification)](https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-2.html#jvms-2.5.2)。7和9使用的相同的描述  
+
+##### 方法区和运行时常量池溢出
+
+方法区和运行时常量池在1.7开始溢出了持久代，因此在1.6可以使用-XX:MaxPermSize来这是持久代最大内存。String.intern()是一个Native方法，如果常量池中存在当前字符串, 就会直接返回当前字符串. 如果常量池中没有此字符串, 会将此字符串放入常量池中后, 再返回。  
+openjdk已经不提供1.6的二进制文件了（我没找到），我就在GitHub上找了一个。  
+
+```java
+List<String> list = new ArrayList<String>();
+int i = 0;
+while (true) {
+    list.add(String.valueOf(i++).intern());
+}
+```
+
+但是，书上的代码不溢出，它会一直创建，使用JProfilter发现它会一直在堆上创建，我添加了-Xmx=10M抛出了OOM，也就是说我添加的-XX:PermSize=10m -XX:MaxPermSize=10m没有生效，但是减少MaxPermSize的值比如2m确实能抛出OutOfMemoryError:PermGen space，就很奇怪了，总不会是这个是魔改版的吧。 ~~应该是魔改版，后面的String.intern()返回引用的测试也是1.7的输出。~~ 也不对，换了zulu的openjdk也是没有溢出，返回引用也是1.7的输出。  
+理论上讲，String.intern()的对象会存储在永久代，然后返回永久代的引用，而StringBuilder创建的对象在Java堆上，所以str1.intern() == str1是错误的。而在1.7之后intern()只是在常量池中记录首次出现的实例。  
+至于7及以后的方法区溢出时运行时产生大量类填满方法区，比如动态生成大量class的应用。  
+
+>String.intern()可以看这篇博客 [深入解析String#intern](https://tech.meituan.com/2014/03/06/in-depth-understanding-string-intern.html)
+
+##### 本机直接内存溢出
+
+DirectMemory类似于native memory，是共享的硬件底层缓冲区，通过-XX:MaxDirectMemorySize指定，不指定默认与-Xmx一样。代码中越过了DirectByteBuff类，直接通过反射获取Unsafe实例及逆行内存分配，因为DIrectByteBuffer分配内存抛出异常时，并没有真正像操作系统申请内存，而是通过计算然后抛出，真正申请的时unsafe.allocateMemory()  
+
+```java
+private static final int _1MB = 1024 * 1024;
+public static void main(String[] args) throws Exception {
+    Field unsafeField = Unsafe.class.getDeclaredFields()[0];
+    unsafeField.setAccessible(true);
+    Unsafe unsafe = (Unsafe) unsafeField.get(null);
+    while(true) {
+        unsafe.allocateMemory(_1MB);
+    }
+}
+```
+
+书中说DirectMemory导致内存溢出， 一个特征时Heap Dump文件中不会看到明显异常，而我加了-XX:+HeapDumpOnOutOfMemoryError后并没有快照生成。
+
+### 垃圾收集器与内存分配策略
+
+#### 对象已死么
+
+##### 引用计数算法
+
+给对象中添加一个引用计数器，当有地方引用它时，计数器+1，当引用失效时，计数器-1，当计数器为0的时候，表示该对象没有被引用，所以可以被回收。  
+
+```java
+public class ReferenceCountingGC {
+    public Object instance = null;
+    private static final int _1MB = 1024 * 1024;
+    private byte[] bigSize = new byte[2 * _1MB];
+    public static void testGC() {
+        ReferenceCountingGC objA = new ReferenceCountingGC();
+        ReferenceCountingGC objB = new ReferenceCountingGC();
+        objA.instance = objB;
+        objA.instance = objA;
+        objA = null;
+        objB = null;
+        System.gc();
+    }
+}
+```
+
+这两个对象相互引用，但是引用计数器不为0，于是无法回收它们。难道不能设置null为0么？？  
+[GC [PSYoungGen: 7997K->648K(75776K)] 7997K->648K(248320K), 0.0016632 secs]  
+实际上JVM还是会回收了它们，因为JVM才用的是可达性分析算法
+
+##### 可达性分析算法
+
+这个算法思路是通过一系列为“GC Roots”的对象作为起点，从这些节点开始向下搜索，所走过的路叫做引用链，当一个对象到GC Roots没有任何引用链的时候，就可以证明对象不可用，可以被回收掉。  
+
+```java
+public class ReferenceCountingGC {
+    public Object instance = null;
+    private static final int _1MB = 1024 * 1024;
+    private byte[] bigSize = new byte[2 * _1MB];
+    public static void testGC() throws InterruptedException {
+        ReferenceCountingGC objA = new ReferenceCountingGC();
+        ReferenceCountingGC objB = new ReferenceCountingGC();
+        objA.instance = objB;
+        objA.instance = objA;
+        objA = null;
+        objB = null;
+        ReferenceCountingGC objC = new ReferenceCountingGC();
+        ReferenceCountingGC objD = new ReferenceCountingGC();
+    }
+}
+```
+
+这段代码可以通过JProfiler分析  
+![image.png](https://i.loli.net/2019/12/14/Ylsiehnyfz3pBLT.png)
+可以看到这个类是有5个实例引用的，而查看堆的快照的时候只有3个实例(AB为null了)，点击上面的Run GC，实例引用变成了3个了  
+![image.png](https://i.loli.net/2019/12/14/qBXYLdMA4JoGkHe.png)
+可作为GC Roots的在源码中有10种，为枚举类型，且还分MarkFromRootsTask和ScavengeRootsTask，即标记和清楚，但是枚举是一样的，只是顺序不同
+
+```c++
+enum RootType {
+    universe              = 1,      //JVM内部使用的引用
+    jni_handles           = 2,      //JNI方法
+    threads               = 3,      //所有Java线程当前栈帧的引用和虚拟机内部线程
+    object_synchronizer   = 4,      //所有synchronized锁住的对象引用
+    flat_profiler         = 5,      //性能分析器
+    management            = 6,      //内存池、线程对象和线程快照对象
+    jvmti                 = 7,      //JVMTI导出
+    system_dictionary     = 8,      //JVM内部使用的引用
+    class_loader_data     = 9,      //所有已加载的类
+    code_cache            = 10      //本地代码，比如JIT
+};
+```
+
+这些过于官方了，还是书中的比较好理解，关注点相对少一点。
+
+- 虚拟机栈中以用的对象
+- 方法区中类静态属性引用的对象
+- 方法区中常量引用的对象
+- 本地方法栈中JNI
+
+##### 再谈引用
+
+在JDK1.2后，提出了强引用、软引用、弱引用、虚引用。  
+强引用：只要强引用还在，就不会被回收，比如new的对象。  
+软引用：还有用，但不是必须的对象，之后再内存不够的时候才会被回收，可以作为缓存  
+弱引用：比软引用更弱一些，生命周期直到下次垃圾回收的时候  
+虚引用：并不会决定对象的生命周期，也无法通过虚引用来取得一个对象的实例，其主要是用来追踪对象被垃圾回收器回收的活动，必须和引用队列联合使用。  
+
+>引用队列 ReferenceQueue，当引用对象所指向的内存空间被GC回收后，该引用对象被追加到引用队列的末尾  
+>我们通过get方法得到其指定对象，它的唯一作用是当其他指向对象被回收之后，自己被加入引用队列，用作记录该引用指向的对象已被销毁，虚引用能在其指向的对象从内存中移除掉之后才会加入到引用队列，程序可以通过判断引用队列中是否已经加入虚引用，来了解被引用的对象是否被垃圾回收
+
+##### 生存还是死亡
+
+一个对象被回收至少要经历两次标记过程：可达性分析后发现与GC Roots没有引用链，那么他会被第一次标记并且根据是否有必要执行finalize()进行一次筛选。当对象没有重写finalize()方法，或者该方法已经被虚拟机调用过，就会被视为“没有必要执行”。而一个对象被判断为必须执行finalize()方法，就会讲这个对象放入到F-Queue队列中，并稍后由一个虚拟机自动创建的、低优先级的Finalized线程去执行finalize()方法。稍后GC将对F-Queue进行第二次标记，如果对象在finalize()中重新与GC Roots建立引用链，例如把自己(this)复制给某个类或者类的成员变量，就不会被回收。  
+
+```java
+@Override
+protected void finalize() throws Throwable {
+    super.finalize();
+    FinalizeEscapeGC.SAVE_HOOK = this;
+}
+```
+
+不过finalize()方法并不好，在jdk9中已经提示过时，在《Effect Java》中也不建议使用[effect java](http://sjsdfg.gitee.io/effective-java-3rd-chinese/#/notes/08.%20%E9%81%BF%E5%85%8D%E4%BD%BF%E7%94%A8Finalizer%E5%92%8CCleaner%E6%9C%BA%E5%88%B6)
+
+###### 疑问
+
+为什么F-Queue队列中执行缓慢或者死循环会使GC崩溃？
+
+##### 回收方法区
+
+方法区里面有常量和类信息，方法区在Java堆，也可以按照Java堆回收一样，只是效率比较低。常量可以像对象一样回收，比如String中没有引用，在回收阶段就会被回收。而类卸载就比较麻烦，要同时满足3个条件：  
+
+- 该类所有实例都被回收
+- 加载该类的ClassLoader已经被回收
+- 该类对应的java.lang.Class对象没有任何地方被引用，无法在任何地方通过反射访问该类的方法
+
+#### 垃圾收集算法
+
+##### 标记 - 清除算法
+
+最基础的收集算法，分为标记和清除两个阶段。标记是与GC Roots没有引用链的，清除就是回收标记的内存。但是这个算法有两个缺点：效率问题，标记和清除两个过程效率不高；空间问题，直接清除掉会造成内存空间碎片，如果一个大的对象要分配内存，如果无法找到足够大的内存旧的出发另一次垃圾收集动作。  
+
+##### 复制算法
+
+将内存平均分成两半，每次只使用一半。回收的时候，将一半的内存中活的对象按顺序复制到另一半内存中，这样就不会存在空间碎片了。这种算法的代价就是内存减少了一半。现在的商业虚拟机都采用这种方法来收集新生代。新生代分为一个较大的Eden区和两个Survivor区，每次使用Eden区和一个Survivor区。回收的时候，将Eden区和Survivor存活的对象一次性复制到另一个Survivor区种，然后清除掉Eden区和Survivor。HotSpot默认Eden：Survivor = 8：1。如果新生代放不下，对象可以直接通过分配担保机制进入老年代。  
+
+##### 标记 - 整理算法
+
+如果对象存活率过高就要进行较多的复制，效率低。如果不想浪费50%空间，就需要额外的空间担保。通常老年代一般选择复制算法，而是使用标记 - 整理算法。标记过程与标记 - 清除一样，之后不采用清除，而是让所有存活的对象向一端移动，然后清除掉边界以外的内存。  
+
+##### 分代收集算法
+
+根据对象存活周期的不同将内存划分为几块，一般分为新生代和老年代。新生代有大量对象被清除，少量对象存活，使用复制算法；老年代对象存活率高，使用标记 - 整理算法。
+
+#### HotSpot算法实现
+
+##### 枚举根节点
+
+在标记过程要查找与GC Roots的引用链，可做为GC Roots节点的主要是全局性的引用(常量、静态变量等)与执行上下文(例如栈帧中的本地变量表)，如果是遍历这里面的引用，必然回消耗很多时间。同时可达性分析对执行时间的敏感还体现在GC停顿上，因为在GC过程中要保证内存不变，如果在GC过程中被标记的对象被再次引用就会出现问题，所以必须停止所有Java执行线程。  
+为了解决这个问题，主流JVM采用准确式GC，即当执行系统停顿下来后，虚拟机知道哪些地方存放着对象引用，在HotSpot中使用OopMap的数据结构，记录了对象偏移量和类型的映射关系，  
+
+>书中讲的实在是简单，发现了两篇不错的文章  
+>[JVM 之 OopMap 和 ememberedSet](https://www.javatt.com/p/47827) 和 [找出栈上的指针/引用](https://www.iteye.com/blog/rednaxelafx-1044951)  
+>一个线程意味着一个栈，一个栈由多个栈帧组成，一个栈帧对应着一个方法，一个方法里面可能有多个安全点。 gc 发生时，程序首先运行到最近的一个安全点停下来，然后更新自己的 OopMap ，记下栈上哪些位置代表着引用。枚举根节点时，递归遍历每个栈帧的 OopMap ，通过栈中记录的被引用对象的内存地址，即可找到这些对象(GC Roots) 。
+
+##### 安全点
+
+安全点是一个特定位置，到了这个位置，才会线程挂起开始GC。安全点选的太少会导致GC时间过长，选的太多会增大运行的压力，要选择一个平衡点，通常会在方法调用、循环跳转、异常跳转等功能性指令会产生SafePoint。为了使所有线程能够在安全点后挂起，有两种方法：抢先式中断和主动式中断：抢先式中断是所有线程全部挂起，未运行到安全点的恢复运行到安全点；主动式中断是在安全点设置标记位，然后轮询，挂起。  
+
+##### 安全区域  
+
+安全区域是安全点的扩展，比如当一个线程sleep，gc显然是不会等到线程到安全点的，所以采用安全区域，即在一段代码片段中，引用关系不会发生变化。当线程执行到安全区域中代码时，标识自己已经进入safe region，如果这段时间发生GC，就不会管标记为safe region的线程了。当线程离开安全区域时，会检查系统是否完完成根节点枚举，如果完成线程继续执行，否则就会等待系统发出的可以安全离开的信号。
+
+#### 垃圾回收器
+
+![image.png](https://i.loli.net/2019/12/21/Vz6YwiuFxEnGLd1.png)  
+HotSpot虚拟机垃圾收回器，连线表示可以组合使用
+
+##### Serial收集器
+
+最基本最悠久的回收器，是一个单线程的收集器，在垃圾回收的时候必须暂停其他所有工作线程，直至收集结束。Serial收集器是虚拟机运行在Client模式下的默认新生代收集器，它和其他收集器比的优点是简单而高效，对于单核环境，没有线程交互，可以获得最高的单线程收集效率。  
+
+>client模式，客户端环境，针对GUI优化，启动速度快，运行速度不如server  
+>server模式，服务器环境，启动慢，运行快  
+>可以通过java -version查看  
+
+##### ParNew收集器
+
+Serial收集器的多线程版本，是运行在server模式下的首选新生代收集器，除了性能原因，还有个原因是除了Serial收集器意外唯一一个能与CMS收集器配合工作的。从图中就可以看出来。在单核绝对不会有Serial收集器更好，因为有线程交互的开销  
+
+>并行：多个相同类型的线程一起工作，其他类型线程处于等待状态  
+>并发：所有线程一起执行
+
+##### Parallel Scavenge收集器
+
+并行多线程收集器，其特点是别的收集器关注点在于尽可能减少由于垃圾回收造成的用户线程停顿，而Parallel Scavenge关注点在于达到一个可控的吞吐量，即 CPU运行用户线程时间与CPU总消耗时间的比值。  
+Parallel Scavenge提供两个参数用于控制吞吐量，最大垃圾回收时间-XX:MaxGCPauseMillis和吞吐量大小-XX:GCTimeRatio。MaxGCPauseMillis允许值是大于0的毫秒数，收集器会尽量把时间控制在这个值内，但不要把这个参数设置的太小，因为GC停顿时间是牺牲吞吐量和新生代空间换取的，回收小内存比大内存快，但是更频繁，所以吞吐量也会降下来；GCTimeRadio是大于0小于100的整数，相当于吞吐量的倒数，默认值为99，即允许最大1%，1 / (1 +99)。  
+也可以使用-XX:+UseAdaptiveSizePolicy来自动调节新生代大小、Eden与Survivor比例，晋升老年代对象大小，使用这个参数只需要把基本内存设置好，然后使用MaxGCPauseMillis或GCTimeRatio给虚拟机一个优化目标。
