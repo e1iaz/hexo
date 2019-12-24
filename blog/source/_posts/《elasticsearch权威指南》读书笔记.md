@@ -495,7 +495,30 @@ Bouncing Result，假如有两个文档有相同的时间戳字段，搜索结�
 
 ##### 游标查询
 
-由于深度分页效率极低，es提供scroll查询，即对某个时间点打快照，忽略之后的变化
+由于深度分页效率极低，es提供scroll查询，即对某个时间点打快照，忽略之后的变化。  
+！！！！！！！！！！！！！有些问题，命令行跑出来数据不对！！！！！！！！！！
+
+### 索引管理
+
+#### 动态映射
+
+当elasticsearch遇到文档中以前位遇到的字段，它用dynamic mapping来确定字段类型，并自动把新的字段添加到类型映射，如果不希望这样，可以配置dynamic，有三个参数  
+
+- true：动态添加新的字段 - 缺省
+- false：忽略新字段
+- strict：遇到新字段抛出异常
+
+但是dynamic设置为false不会改变`_source`字段，只是新的字段不会被添加到映射中。
+>但是现在好像不让更新了，报错，index已经存在了。  
+
+#### 自定义动态映射
+
+如果某个字段，第一个文档`{"note": "2019-12-23"}`，那么elasticsearch会把这个字段设置为date类型，如果第二个文档是`{"note": "log"}`就会报错。可以使用`"date_detection": false`，那么只会是text类型。  
+elasticsearch还提供`dynamic_templates`，但我觉得可能用不到？？ [动态模板](https://www.elastic.co/guide/cn/elasticsearch/guide/current/custom-dynamic-mapping.html#dynamic-templates)
+
+#### 缺省映射
+
+`_default_`映射可以更方便地指定通用设置，而不是每次创建新类型都重复设置，不想使用缺省映射的时候，只需要在自己的映射中声明覆盖掉即可。
 
 ## 书中疑问自己找的
 
