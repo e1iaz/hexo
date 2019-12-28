@@ -194,7 +194,7 @@ PromotedObject*:29 ------>| promo_bits:3 ----->| (CMS promoted object)
 #### 实战OutOfMemoryError
 
 在Java命令加入一些配置  
-|命令|含义|  
+|命令|含义|
 |--|--|
 |-verbose:gc|输出虚拟机GC的详细情况|
 |-Xms20M|堆最小内存20M|
@@ -487,3 +487,119 @@ Serial收集器的多线程版本，是运行在server模式下的首选新生�
 并行多线程收集器，其特点是别的收集器关注点在于尽可能减少由于垃圾回收造成的用户线程停顿，而Parallel Scavenge关注点在于达到一个可控的吞吐量，即 CPU运行用户线程时间与CPU总消耗时间的比值。  
 Parallel Scavenge提供两个参数用于控制吞吐量，最大垃圾回收时间-XX:MaxGCPauseMillis和吞吐量大小-XX:GCTimeRatio。MaxGCPauseMillis允许值是大于0的毫秒数，收集器会尽量把时间控制在这个值内，但不要把这个参数设置的太小，因为GC停顿时间是牺牲吞吐量和新生代空间换取的，回收小内存比大内存快，但是更频繁，所以吞吐量也会降下来；GCTimeRadio是大于0小于100的整数，相当于吞吐量的倒数，默认值为99，即允许最大1%，1 / (1 +99)。  
 也可以使用-XX:+UseAdaptiveSizePolicy来自动调节新生代大小、Eden与Survivor比例，晋升老年代对象大小，使用这个参数只需要把基本内存设置好，然后使用MaxGCPauseMillis或GCTimeRatio给虚拟机一个优化目标。
+
+##### Serial Old收集器
+
+Serial Old是Serial收集器的老年代版本，单线程，使用标记-整理算法，主要用于client模式下的虚拟机使用。Server模式下一种用途是1.5之前与Parallel Scavenge搭配使用，另一种用途是，作为CMS的后备预案
+
+##### Parallel Old 收集器
+
+Parallel Old是Parallel Scavenge收集器的老年版本，多线程，使用标记-整理算法。1.6之后才开始提供，在此之前Parallel Scavenge只能与Serial Old一同使用，但是老年代单线程无法发挥多个CPU的处理能力，吞吐量实际上比不高，知道Parallel Old出现与其配合。
+
+##### CMS收集器
+
+Concurrent Mark Sweep，以获取最短回收停顿时间为目的的收集器，基于标记-清除算法，整体过程分为
+
+- 初始标记
+- 并发标记
+- 重新标记
+- 并发清除
+
+初始标记和重新标记仍然需要停止所有线程，初始标记以下GC Roots能否直接关联到对象，速度很快，并发标记是GC追踪标记过程，而重新标记是修正并发标记期间其他线程运行导致标记不准确的修复过程。其特点就是用户线程和并发标记并发清理一起执行。  
+![image.png](https://i.loli.net/2019/12/28/2PfCcJ6FbsvgqQW.png)  
+但还是三个明显缺点
+
+- 对CPU资源敏感，虽然两个线程一起执行，但是回收依旧会占用CPU使用，所以会导致总吞吐量降低。CMS默认是(CPU数量 + 3) / 4，当cpu在4个以上时就会占用25%以上的CPU资源。如果是单核，采用用户线程与回收线程交替运行，这样减少了停顿时间，但是收集过程会变长。
+- 如果在并发清理过程中用户线程产生的垃圾是不会被标记的，所以这些垃圾就是浮动垃圾，要在下次GC的时候才会被回收。同时使并行的，其他线程也需要空间，所以要预留空间，提前GC。1.5默认设置使老年代使用68%就会被激活，可以通过-XX:CMSInitiatingOccupancyFraction来设置阈值，如果设置很高，运行期间内存无法曼居程序需要，就会临时启用Serial Old收集器，由于单线程， 停顿时间会变长，性能下降。
+- 由于采用的使标记-清除算法，所以会产生空间碎片，当碎片过多时，就没有连续的空间存放大对象，需要触发一次Full GC。
+
+##### G1收集器
+
+收集器技术发展的最前沿成果，jdk9中被提议为默认垃圾回收器，与其他收集器相比，举有以下特点：
+
+- 并行与并发，利用多核优势，缩短STW时间
+- 分代收集，与之前收集器一样分为新生代和老年代，但是不需要配合其他收集器管理GC堆
+- 空间整合：整体上基于标记-整理算法，这样不会产生内存碎片，分配大对象不会提前触发GC
+- 停顿时间可控：可是指定在M毫秒的时间片段内，消耗在垃圾回收的时间不得超过N毫秒
+
+G1提出了Region区域，将堆划分为多个大小相等的独立区域，每个区域在逻辑上被映射为新生代老年代，但是新生代和老年代不再是物理隔离。  
+![image.png](https://i.loli.net/2019/12/28/Hy6r94oSbshqD7M.png)  
+
+>Humongous区表示巨大对象区，即对象大小超过Region一半的对象  
+
+G1收集器不是全区域收集，而是跟踪各个Region里面的价值，后台维护一个优先列表，每次根据回收时间优先回收价值最大的Region。  
+虽然Region按块回收效率会高，但是存在一个问题，就是并不是所有的引用对象都在一个Region里。为了避免全堆扫描，G1采用RemeberSet，每个Region对应一个RememberSet，当发现有Reference类型进行写操作会判读那引用的对象是否处在同一Region下，如果不在就通过CardTable把相关引用信息记录到被引用对象所属的Region的RememberSet中。  
+
+>CardTable，一种数据结构，标记老年代的某块内存区域中的对象是否持有新生代对象的引用  
+
+不计算维护RSet的操作，G1收集器大致分为四步：
+
+- 初始标记，STW，扫描GC Roots，标记直接可达对象并压入扫描栈
+- 并发标记，并发递归扫描marking stack，并标记存活对象，扫描SATB pre-write barrier
+- 最终标记，STW，需要刷新SATB pre-write barri的budder
+- 筛选回收，清点和重置标记状态，重置RSet，盘点活对象，如果没有活对象，即直接回收Region到free list
+STAB是堆的一个快照，标记数据结构包括两个位图：previous位图(PTAMS)和next位图(NTAMS).  
+![image.png](https://i.loli.net/2019/12/28/nriouQvet85CAdg.png)  
+NTAMs会先扫描到Top的空间，在扫描期间，分配的对象会都在[NTAMS, Top]；扫描结束后，会将NTAMS的值赋给PTAMS，STAB给[Bottom, PTAMS]创建一个快照Bitmap，这样确保对象不会被漏标记  
+
+#### 内存分配和回收策略
+
+对象主要分配在新生代的Eden上，如果启动本地线程分配缓冲，将按线程优先在TLAB上分配，少数情况下可能会直接分配在老年代
+
+##### 对象优先在Eden分配
+
+对象在新生代Eden区分配，当Eden没有足够空间进行分配是，虚拟机就会发起一次Minor GC
+
+```java
+/**
+ * -verbose:gc -Xms20M -Xmx20M -Xmn10M -XX:+PrintGCDetails -XX:SurvivorRatio=8
+ */
+private static final int _1MB = 1024 * 1024 / 2;
+public static void main(String[] args) {
+    byte[] allocation1, allocation2, allocation3, allocation4;
+    allocation1 = new byte[3 * _1MB];
+    allocation2 = new byte[4 * _1MB];
+    allocation3 = new byte[4 * _1MB];
+    allocation4 = new byte[8 * _1MB];
+}
+```
+
+```text
+Heap
+ PSYoungGen      total 9216K, used 7290K [0x00000000ff600000, 0x0000000100000000, 0x0000000100000000)
+  eden space 8192K, 88% used [0x00000000ff600000,0x00000000ffd1eb20,0x00000000ffe00000)
+  from space 1024K, 0% used [0x00000000fff00000,0x00000000fff00000,0x0000000100000000)
+  to   space 1024K, 0% used [0x00000000ffe00000,0x00000000ffe00000,0x00000000fff00000)
+ ParOldGen       total 10240K, used 4096K [0x00000000fec00000, 0x00000000ff600000, 0x00000000ff600000)
+  object space 10240K, 40% used [0x00000000fec00000,0x00000000ff000010,0x00000000ff600000)
+ PSPermGen       total 21504K, used 3137K [0x00000000f9a00000, 0x00000000faf00000, 0x00000000fec00000)
+  object space 21504K, 14% used [0x00000000f9a00000,0x00000000f9d10490,0x00000000faf00000)
+```
+
+这段代码和GC日志中显示，allocation123都是存活的，虚拟机没有找到可回收的对象，当给4分配内存是，发现Eden区已经占用了6MB，不足在分配4MB，因此发生Minor GC，而123都是2MB，无法放入到Survivor区，因此只能通过分配担保机制提前转移到老年代。  
+不过和书中不同，书中是将3个2MB的对象移入到老年代，而我的代码，是将4移入到老年代  
+
+> MinorGC：新生代GC，发生在新生代的垃圾收集动作，GC频繁，回收速度快  
+> MajorGC/Full GC：老年代GC，发生在老年代，出现MajorGC至少发生一次MinorGC，通常比MinorGC慢。  
+> 后面再尝试多new几个大对象时，出现了GC时间的时间戳，由此看出，在我的jdk7下，大对象时直接进入老年代，而不是发生GC  
+> 也就是说，对象分配现在eden中，然后再MinorGC时将对象转到Survivor里，然后再是老年代。  
+
+##### 大对象直接进入老年代
+
+上面的代码在我的jdk下就是大对象直接进入老年代。可以通过-XX:PretenureSizeThreshold设置大于这个值的对象直接在老年代分配
+
+##### 长期存活的对象将进入老年代
+
+虚拟机给每个对象定义一个对象年龄计数器，如果Eden出生并经过一次Minor GC后被放入到Survivor区时，会将年龄设为1，每次Minor GC都会加一，在到达阈值（默认15）就会晋升到老年代，可以通过-XX:MaxTenuringThreshold设置。
+可以很好理解，因为要复制，复制就有消耗，对于长时间存在的对象就没有必要每次都复制，所以放到老年代。
+
+##### 动态对象年龄判断
+
+为了更好的使用内存状况，虚拟机提供动态对象年龄判断。即如果在Survivor空间中相同年龄所有对象大小总和大于Survivor空间的一半，年龄大于或等于该对象就可以直接进入老年代，无需等待阈值。
+
+##### 空间分配担保
+
+现在的jdk只要老年代的连续空间大于新生代对象总大小或者历次晋升的平均大小就会进行Minor GC，否则就会进行Full GC。
+Jdk6 update24之前会进行一个空间担保的参数设定，如果为true则允许冒险。这个冒险是的风险是在Manor GC之前不知道有多少对象会存活，也不知道有多少对象会晋升到老年代，所以设定一个值与老年代的剩余空间进行比较；如果为false，即不开启担保，在老年代最大可用的连续的空间小于新生代所有对象总空间就会出发Full GC。
+
+> 这个担保就是将Full GC的条件分为三段，大于新生代所有对象总空间；小于总空间但大于一个值有风险可以尝试；小于这个值Full GC
