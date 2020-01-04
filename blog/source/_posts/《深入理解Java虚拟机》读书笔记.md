@@ -309,7 +309,7 @@ public static void main(String[] args) throws Exception {
 
 书中说DirectMemory导致内存溢出， 一个特征时Heap Dump文件中不会看到明显异常，而我加了-XX:+HeapDumpOnOutOfMemoryError后并没有快照生成。
 
-### 垃圾收集器与内存分配策略
+### 第三章垃圾收集器与内存分配策略
 
 #### 对象已死么
 
@@ -603,3 +603,131 @@ Heap
 Jdk6 update24之前会进行一个空间担保的参数设定，如果为true则允许冒险。这个冒险是的风险是在Manor GC之前不知道有多少对象会存活，也不知道有多少对象会晋升到老年代，所以设定一个值与老年代的剩余空间进行比较；如果为false，即不开启担保，在老年代最大可用的连续的空间小于新生代所有对象总空间就会出发Full GC。
 
 > 这个担保就是将Full GC的条件分为三段，大于新生代所有对象总空间；小于总空间但大于一个值有风险可以尝试；小于这个值Full GC
+
+### 第四章 虚拟机性能监控与故障处理工具
+
+#### JDK命令行工具
+
+在jdk的bin目录下有一些由Sun公司封装了tools.jar的监控工具。
+
+##### jps：虚拟机进程状态工具
+
+类似于Linux下的ps命令，可以显示所有运行的虚拟机进程，虚拟机执行主类名称以及进程的本地虚拟机ID(LVMID，Local Virtual Marchine Identical)，且LVMID与操作系统的的进程ID一致。  
+jps命令格式  
+jps [ options ] [ hostid ]  
+常用参数  
+|参数|含义|
+|--|--|
+|-q|只输出LVMID，省略主类名称。|
+|-m|输出虚拟机进程启动时传递给主类main()函数的参数|
+|-l|输出主类的全名，如果进程执行的是jar包，输出jar路径|
+|-v|输出虚拟机进程启动时JVM参数|
+
+##### jstat：虚拟机统计信息监视工具
+
+用于监视虚拟机中各种运行状态信息的命令工具，有些像Linux的top命令  
+jstat命令格式  
+jstat [ option vmid [ interval ] [ s | ms ] [ count ] ]  
+其中如果链接到本地虚拟机，vmid就是 LVMID，如果是远程，VMID格式为  
+[ protocol: ][ // ] lvmid [ @hostname [ :port ]/servername ]  
+参数interval和count表示查询间隔和次数，如果不设置默认值查询1次  
+常用参数
+|参数|含义|
+|--|--|
+|-class|监视类装载、卸载数量、总空间以及类装载所耗费的时间|
+|-gc|监视Java堆状况，包括Eden区、两个Survivor区、老年代、元空间（jdk6为永久代）等用量、已用空间、GC时间合计等信息|
+|-gccapacity|监视内容与-gc基本相同，但输出主要关注Java堆各个区域使用到的最大、最小空间|
+|-gcutil|监视内容与-gc基本相同，但输出主要关注已使用空间占总空间的百分比|
+|-gccause|与-gcutil功能一样，但是会额外输出导致上次GC产生的原因|
+|-gcnew|监视新生代GC状况|
+|-gcnewcapacity|监视内容与-gcnew基本相同，输出主要关注使用到的最大、最小空间|
+|-gcold|监视老年代状况|
+|-gclodcapacity|监视内容与-gcold基本相同，出书主要关注使用到的最大、最小空间|
+|-compiler|输出JIT编译器编译过的方法、耗时等信息|
+|-printcompilation|输出已经被JIT编译的方法|
+|-gcmetacapacity|输出元数据空间状况
+输出参数的含义
+|参数|含义|
+|--|--|
+|S0|第一个Survivor区|
+|S0C|第一个Survivor区总容量|
+|S0U|第一个Survivor区使用容量|
+|S1|第二个Survivor区|
+|E|Eden区|
+|O|Old区|
+|M|元数据|
+|CCS|压缩类空间|
+|YGC|年轻代回收次数|
+|YGCT|年轻代回收消耗时间|
+|FGC|老年代回收次数|
+|GCT|垃圾回收总时间|
+|Loaded|加载class的数量|
+|Bytes|所占用空间大小|
+|Unloaded|未加载数量|
+|Time|类装载所消耗时间|
+|NGCMN|新生代最小容量|
+|NGCMX|新生代最大容量|
+|NGC|当前新生代容量|
+|TT|对象在新生代存活的次数|
+|MTT|对象在新生代存活的最大次数|
+|DSS|期望Survivor区大小|
+|Compiled|最近编译方法的数量|
+|Failed|失败数量|
+|Invalid|不可用数量|
+|Time|时间|
+|FailedType|失败类型|
+|FailedMethod|失败的方法|
+|Size|最近编译方法的字节码数量|
+|Type|最近编译方法的编译类型|
+|Method|方法名称标识|
+
+##### jinfo：Java配置信息工具
+
+实时查看和调整虚拟机各项参数，可以使用 -flag [ +|- ] name 或者 -flag name=value修改一部分运行起家可写的虚拟机参数。  
+jinfo 命令格式  
+jinfo [ option ] pid  
+常用参数  
+|参数|含义|
+|--|--|
+|\<no option>|输出虚拟机和系统所有信息|
+|-flags|输出虚拟机所有信息|
+|-sysprops|输出系统所有信息|
+|-flag \<name>|输出虚拟机指定信息|
+|-flag [ +\|- ]\<name>|新增和减少指定参数|
+|-flag \<name> = \<value>|修改指定参数|
+
+##### jmap：Java内存映像工具
+
+用于生成堆转储快照，在Windows下只能使用-dump和-histon选项，其他选在要在Linux/Solaris下使用  
+jmap命令格式  
+jmap [option] vmid  
+option选项  
+|参数|含义|
+|--|--|
+|-dump|生成Java堆转储快照。格式：-dump:[live, ]format = b, file=<filename>，其中live子参数说明是否只dump出存活的对象|
+|-finalizerinfo|显示在F-Queue中等待Finalizer线程执行finalize方法的对象|
+|-heap|显示Java堆详细信息|
+|-histo|显示堆中对象统计信息，包括类、实例数量、合计容量|
+|-F|强制生成dump快照|
+
+##### jhat：虚拟机堆转储快照分析工具
+
+搭配jmap使用，分许jmap生成的dump文件，内置了微信的HTTP服务器，生成的dump分析结果后可以在浏览器上查看。
+
+##### jstack：Java堆栈追踪工具
+
+生成虚拟机当前时刻的线程快照，是当前虚拟机内每一条线程正在执行的方法堆栈的集合，目的是定位线程长时间停顿的原因。  
+jstack命令格式  
+jstack [ option ] vmid  
+参数
+|参数|含义|
+|--|--|
+|-F|强制输出线程堆栈|
+|--l|除堆栈外，显示关于锁的附加信息|
+|-m|如果调用到本地方法栈，可以显示C/C++的堆栈|
+
+##### HSDIS：JIT生成代码反汇编
+
+sun公司推出的反汇编插件，源码在HotSpot中，但没有编译后的程序，需要自己下载或编译。在使用java是添加参数，-XX:+UnlockDiagnosticVMOptions -XX:+PrintAssembly即可输出，使用-XX:CompileCommand可以让编译器不要内联函数
+
+> 内联函数是指编译器将指定的函数体插入并取代每一处调用该函数的地方，从而节省了每次调用函数带来的额外时间开销。
