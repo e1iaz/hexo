@@ -262,7 +262,7 @@ public static void main(String[] args) {
 >OutOfMemeory书中写的不是很好，在Oracle的虚拟机规范中是这么写的
 >
 >- If the computation in a thread requires a larger Java Virtual Machine stack than is permitted, the Java Virtual Machine throws a   StackOverflowError.  
->- If Java Virtual Machine stacks can be dynamically expanded, and expansion is attempted but insufficient memory can be made available to effect the expansion, or if insufficient memory can be made available to create the initial Java Virtual Machine stack for a new thread, the Java Virtual 
+>- If Java Virtual Machine stacks can be dynamically expanded, and expansion is attempted but insufficient memory can be made available to effect the expansion, or if insufficient memory can be made available to create the initial Java Virtual Machine stack for a new thread, the Java Virtual  
 Machine throws an OutOfMemoryError.  
 >
 >翻译过来是  
@@ -704,7 +704,7 @@ jmap [option] vmid
 option选项  
 |参数|含义|
 |--|--|
-|-dump|生成Java堆转储快照。格式：-dump:[live, ]format = b, file=<filename>，其中live子参数说明是否只dump出存活的对象|
+|-dump|生成Java堆转储快照。格式：-dump:[live, ]format = b, file=\<filename>，其中live子参数说明是否只dump出存活的对象|
 |-finalizerinfo|显示在F-Queue中等待Finalizer线程执行finalize方法的对象|
 |-heap|显示Java堆详细信息|
 |-histo|显示堆中对象统计信息，包括类、实例数量、合计容量|
@@ -731,3 +731,117 @@ jstack [ option ] vmid
 sun公司推出的反汇编插件，源码在HotSpot中，但没有编译后的程序，需要自己下载或编译。在使用java是添加参数，-XX:+UnlockDiagnosticVMOptions -XX:+PrintAssembly即可输出，使用-XX:CompileCommand可以让编译器不要内联函数
 
 > 内联函数是指编译器将指定的函数体插入并取代每一处调用该函数的地方，从而节省了每次调用函数带来的额外时间开销。
+
+#### JDK可视化工具
+
+##### JConsole：Java监视与管理控制台
+
+基于JMX的可视化监控，在bin目录下的jconsole.exe。
+
+###### 内存
+
+```java
+/**
+ * -Xms100m -Xmx100m -XX:+UseSerialGC
+ */
+static class OOMObject {
+    public byte[] placeholder = new byte[64 * 1024];
+}
+public static void fillHeap(int num) throws InterruptedException {
+    List<OOMObject> list = new ArrayList<>();
+    for (int i = 0; i < num; ++i){
+        Thread.sleep(50);
+        list.add(new OOMObject());
+    }
+    System.gc();
+}
+public static void main(String[] args) throws InterruptedException {
+    fillHeap(1000);
+}
+```
+
+在这段代码运行后，Java堆是100M，一个OOMObject对象为64KB，1000次大约64MB，加上空线程跑堆内存使用20+MB，差不多也有100MB了，结束后如图所示  
+![image.png](https://i.loli.net/2020/01/11/5ChEZ4n8BaQqrKp.png)  
+堆的第一个柱状图是Eden区，最大值27328KB，根据默认Eden : Survivor = 8 : 1，则年轻代总大小为 27328 * 10 / 8=34160KB。倒是书中提到的，Eden区和Survivor基本被清空了，应该是没有是线程sleep，没有执行gc导致的，加入一行Thread.Sleep(1000)让函数内gc完成，就会出现书中描述得了。在YGC的过程中，Survivor柱状图没动过，表明Survivor的对象没有别移入到老年代，因为年龄还不够，至于有没有激活动态对象年龄判断还看不清楚。因为gc实在函数内完成的，因为所有对象都与list有关联，所以不会被回收，只需要把gc请求放到main函数中，这样所有的对象都没有关联，就会被GC掉。  
+
+###### 线程
+
+```java
+static class SynAddRunnable implements Runnable {
+    int a, b;
+    public SynAddRunnable(int a, int b) {
+        this.a = a;
+        this.b = b;
+    }
+    @Override
+    public void run() {
+        synchronized (Integer.valueOf(a)) {
+            synchronized (Integer.valueOf(b)) {
+                System.out.println(a + b);
+            }
+        }
+    }
+}
+public static void main(String[] args) throws Exception {
+    for (int i = 0; i < 100; i++) {
+        new Thread(new SynAddRunnable(1, 2)).start();
+        new Thread(new SynAddRunnable(2, 1)).start();
+    }
+}
+```
+
+为了避免占用更多的内存， JVM为Integer对象提供一个常量池，范围是[-128, 127]，而synchronized是互斥锁，在多线程的情况下，可能会出现一个线程拿到了Integer.valueOf(1)这个对象的锁，一个对象拿到了Integer.valueOf(2)这个对象的锁，两个线程都在等待对方释放锁，如图所示。  
+![image.png](https://i.loli.net/2020/01/11/4MCzQVRtba9N3TU.png)
+
+##### VisulalVM：多合一故障处理工具
+
+基于NetBeans平台开发， 具备了插件扩展功能，通过扩展可以做到  
+
+- 显示虚拟机进程以及进程的配置、环境信息
+- 监视应用的CPU、GC、堆等信息
+- dump以及分析堆转储快照
+- 方法级的程序运行性能分析
+- 离线程序快照
+
+对于可视化工具，主要还是熟悉操作。在介绍中，有个比较强的，BTrace，动态日志追踪，可以在程序运行中，加入原本不存在的调试代码。  
+创建一个BTraceTest类，类中有个add(int a, int  b)方法，在BTrace标签中使用代码  
+
+```java
+import com.sun.btrace.annotations.*;
+import static com.sun.btrace.BTraceUtils.*;
+@BTrace
+public class TracingScript {
+    @OnMethod(
+    clazz="jvm.BTraceTest",  
+    method="add",
+    location=@Location(Kind.RETURN))
+    public static void func(@Self jvm.BTraceTest instance, int a, int b, @Return int result) {
+        println("调用堆栈: ");
+        jstack();
+        println(strcat("方法参数A: ", str(a)));
+        println(strcat("方法参数B: ", str(b)));
+        println(strcat("方法结果: ", str(result)));
+    }
+}
+```
+
+clazz表示要调试的类名，method表示要调试的方法名，然后再func中写明调试代码，就可以输出想要的信息。在执行后，只要在程序现中执行到add()方法就会打印出a, b和返回值的信息，对于调试还是很有帮助的。
+
+### 第五章 调优案例分析与实战
+
+#### 案例分析
+
+##### 高性能硬件上的程序部署策略
+
+一个15万的PV/天的在线文档类型网站，硬件4核CPU，16GB物理内存。选择64位jdk5，堆大小位12G，收集器使用Parallel Scavenge和Parallel Old，基于吞吐量优先收集器。结果是网站长时间失去响应。  
+12G的堆空间，GC时间肯定要比2G空间要长的，而且是基于吞吐量收集器，年轻代是Parallel Scavenge，如果参数设置过小，要求每次Minor GC时间尽可能小，那么新生代空间也会变小；又因为是在线文档类型的网站，因此内存中会有很多序列化对象，如果在Minor GC过程中没有清理到，就会进入到老年代，新生代小则老年代大，Full GC就要使用过多的时间。  
+对于高性能硬件部署程序，主要是有两种，一种是通过64位JDK，一种是使用若干个32位构建逻辑集群。第一种情况，需要程序能控制好Full GC次数，不然就会出现案例中现象，频繁Full GC导致网站失去响应。如果Full FC一天一次可以跑定时任务，在没人的时候触发Full GC。不过这种情况还有个问题，如果出现堆溢出，dump文件可能无法分析。  
+使用若干个32位集群，需要前端搭建一个负载均衡器，这样会减少GC时间。但同样也有缺点：  
+
+- 节点争夺全局资源，像案例中的磁盘竞争，可能会出现IO问题
+- 资源池，可能会出现一个节点线程池满了，而其他节点还很空闲
+- 内存上限，我觉得可以使用64位集群，只要分配堆空间小一点。
+- 大量冗余的本地缓存，比如String
+
+在案例中的解决方法是5个32位JDK逻辑集群，每个节点2GB；一个负载均衡代理；由于是文档系统，堆CPU要求不高，主要压力在于硬盘IO和内存，所以使用CMS收集器。  
+这个案例也体现了微服务的优点，可能横向扩展会是现在的主要方案吧。
