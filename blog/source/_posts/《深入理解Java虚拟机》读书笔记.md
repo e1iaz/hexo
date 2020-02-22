@@ -1239,3 +1239,53 @@ InnerClasses属性
 |u2|bootstrap_method_ref|1|指向常量池的有效索引，且为CONSTANT_MehtodHandle_info结构|
 |u2|num_bootstrap_argumengts|1|bootstrap_arguments[]数组成员的数量|
 |u2|bootstrap_arguments|num_bootstrap_arguments|对应常量池的索引，结构必须为COUNTSTANT_String_info、Class、Integer、Long、Float、Double、MethodHandle、MethodType之一|
+
+##### 字节码指令简介
+
+Java虚拟机采用的是操作数栈，即用一个字节长度代表特别操作含义的数字（操作码），后面跟着0个活或多个参数（操作数）。Java虚拟机的操作码长度为1个字节，即操作码总数不超过256个。class文件放弃了编译后代码的操作数长度对齐，就是说虚拟机不知道参数的长度，因此当处理的数据超过一个字节数据是，就需要从字节中重构具体结构。这样做的缺点是解释执行字节码时会损失一些性能，优点时省略了填充和间隔符号。操作流程如下  
+
+![image.png](https://i.loli.net/2020/02/22/dFhvXcksTHy1MlW.png)  
+
+###### 字节码与数据类型
+
+从局部变量表中加载基础类型到操作数栈，在虚拟机内可能由同一段代码实现，但是在class中需要使用各自独立的操作码，iload用于加载int，fload加载float。其中i代表int类型，l代表long， s代表short，b代表byte，c代表char，f代表float，d代表double，a代表reference。但是如果所有的操作都支持所有类型的话，256个操作码是不够的，所以有一些操作码只允许特定的类型进行操作，其他类型想要操作需要转化为被支持的类型。
+
+|opcode|byte|short|int|long|float|double|char|reference|含义|
+|--|--|--|--|--|--|--|--|--|--|
+|Tipush|bipush|sipush|||||||将T型常量值推送至栈顶|
+|Tconst|||iconst|lconst|fconst|dconst||acounst|将T型推送到栈顶|
+|Tload|||iload|lload|fload|dload||aload|将指定的T型局部变量推送到栈顶|
+|Tstore|||istore|lstore|fastore|dstore||astore|将栈顶T型数值存入指定局部变量|
+|Tinc|||iinc||||||iinc M N（M为非负整数，N为整数）将局部变量数组的第M个单位中的int值增加N|
+|Taload|baload|saload|iaload|laload|faload|daload|caload|aaload|将T型数组指定索引的值推送至栈顶|
+|Tastore|bastore|sastore|iastore|lastore|fastore|dastore|castore|aastore|将栈顶T型数值存入指定数组的指定索引位置|
+|Tadd|||iadd|ladd|fadd|dadd|||将栈顶两T型数值相加并将结果压入栈顶|
+|Tsub|||isub|lsub|fsub|dsub|||将栈顶两T型数值相减并将结果压入栈顶|
+|Tmul|||imul|lmul|fmul|dmul|||将栈顶两T型数值相乘并将结果压入栈顶|
+|Tdiv|||idiv|ldiv|fdiv|ddiv|||将栈顶两T型数值相除并将结果压入栈顶|
+|Trem|||irem|lren|frem|drem|||将栈顶两T型数值取模并将结果压入栈顶|
+|Tneg|||ineg|lneg|fneg|dneg|||将栈顶T型取负并将结果压入栈顶|
+|Tshl|||ishl|lshl|||||将T型数值左移指定位数并将结果压入栈顶|
+|Tshr|||ishr|lshr|||||将T型数值右移指定位数并将结果压入栈顶|
+|Tushr|||iushr|lushr|||||将T型数值无符号右移指定位数并将结果压入栈顶|
+|Tand|||iand|land|||||将栈顶两T数值按位与并将结果压入栈顶|
+|Tor|||ior|lor|||||将栈顶两T数值按位或并将结果压入栈顶|
+|Txor|||ixor|lxor|||||将栈顶两T数值按位异或并将结果压入栈顶|
+|i2T|i2b|i2s||i2l|i2f|i2d|||将栈顶int型数值强制转为T型数值并将结果压入栈顶|
+|l2T|||l2i||l2f|l2d|||将栈顶long型数值强制转为T型数值并将结果压入栈顶|
+|f2T|||f2i|f2l||f2d|||将栈顶float型数值强制转为T型数值并将结果压入栈顶|
+|d2T|||d2i|d2l|d2f||||将栈顶double型数值强制转为T型数值并将结果压入栈顶|
+|Tcmp||||lcmp|||||比较栈顶两T型数值的大小，并将结果(1/0/-1)压入栈顶|
+|Tcmpl|||||fcmpl|dcmpl|||比较栈顶两T型数值的大小，并将结果(1/0/-1)压入栈顶，当其中一个值为"NaN"，将-1压入栈顶|
+|Tcmpg|||||fcmpg|dcmpg|||比较栈顶两T型数值的大小，并将结果(1/0/-1)压入栈顶，当其中一个值为"NaN"，将1|
+||||||||||压入栈顶|
+|if_TcmpOP|||if_icmpOP|||||if_acmpOP|比较栈顶两T数值大小，当结果为OP时跳转|
+|Treturn|||ireturn|lreturn|freturn|dreturn||areturn|从当前方法返回T|
+
+###### 加载和存储指令
+
+加载和存储指定用于将数据在栈帧中的局部变量表和操作数栈之间传输：将一个局部变量加载到操作栈Tload、Tload_\<n>；将一个数值从操作数栈存储到局部变量表Tstore、Tstore_\<n>；将一个常量加载到操作数栈：Tpush、ldc、ldc_w、ldc2_w、acount_null、iconst_m1、Tcount_\<T>；扩充局部变量的访问索引的指令：wide。其中尖括号结尾的表示一组指令，例如iload_1、iload_2等。
+
+###### 运算指令
+
+在虚拟机中没有支持byte、short、char、boolean类型的算数运算，对于这类数据应使用int类型的指令代替。在除法和求余指令中出现出书为零，抛出ArithmeticException异常，其他运算不会。当long类型进行比较时，虚拟机采用带符号的比较凡是，浮点数比较采用无信号比较。
