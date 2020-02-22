@@ -1087,3 +1087,155 @@ this_class和super_class指向常量池第19、20个，然后根据这个在索�
 ![image.png](https://i.loli.net/2020/02/01/eVd6ItXmBc3uKJx.png)  
 从图中可以发现这与两个函数，根据name_index和descriptor_index对应的字符串可以知道方法名为`<init>`，描述符为`()V`为构造函数，有一个属性为Code，里面存放方法中的代码。
 如果子类没有Override父类方法，在方法集合中就不会出现父类的方法信息；可能会出现编译器自动添加的方法。Java中Overload除了要与原方法有相同的简单名称之外还要求拥有过一个与原方法不同的特征签名，因此不能仅根据返回值的不同来对方法进行重载。而class文件格式中特征签名范围更大，因此只要描述符不是完全一致的两个方法也是可以共存的。
+
+##### 属性表集合
+
+属性表集合的限制比较宽松，任何人都可以向属性表中写入定义的属性信息。而JVM运行时会试别预定于的属性，忽略掉不认识的属性。  
+|属性名称|使用位置|含义|
+|--|--|--|
+|Code|方法表|Java代码编译成的字节码指令|
+|ConstantValue|字段表|final关键字定义的常量值|
+|Deprecated|类、方法表、字段表|final关键字定义的常量值|
+|Exceptions|方法表|方法抛出的异常|
+|EnclosingMethod|类文件|仅当一个类为局部类或者匿名类时才能拥有这个属性，这个属性用于标识这个类所在的外围方法。|
+|InnerClasses|类文件|内部类列表|
+|LineNumberTable|code属性|Java源码的行号与字节码指令的对应关系|
+|StackMapTable|code属性|新的类型检查器检查和处理目标方法的局部变量和操作数栈所需要的类型是否匹配|
+|Signature|类、方法表、字段表|支持泛型情况下的方法签名，再Java语言中，任何类、接口、初始化方法或成员的泛型签名如果包含了类型变量或参数化类型，则Signature属性会为它记录泛型签名信息。由于Java的泛型采用擦除发实现，在稳了避免类型信息呗擦除后导致参数混乱，需要找个属性记录泛型中的相关信息。|
+|SourceFile|类文件|记录源文件名称|
+|SourceDebugExtension|类文件|用于存储额外的调试信息|
+|Synthetic|类、方法表、字段表|标识方法或字段为编译器自动生成|
+|LocalVariableTypeTable|类|特征签名代替描述符，为了引用泛型语法之后能描述泛型参数化类型而添加的|
+|RuntimeVisibleAnnotations|类、方法表、字段名|为动态注解提供支持，用于指明哪些注解是运行时可见|
+|RuntimeInvisibleAnnotations|类、方法表、字段表|与RuntimeVisibleAnnotations相反，用于指明哪些注解是运行时不可见的|
+|RuntimeVisibleParameter|方法表|与RuntimeVisibleAnnotations类似，只是不能作用对象为方法参数|
+|RuntimeInvisibleParameterAnnotations|方法表|与RuntimeInvisibleAnnotations类似，只是不能作用对象为方法参数|
+|AnnotationDefault|方法表|用于记录注解类元素的默认值|
+|BootstrapMethods|类文件|保存iinvokednamic指令引用的引导方法限定符|
+
+每个属性，名称是从常量池引用CONSTANT_Utf8_info的常量，属性结构自定义，通过attribut_length说明属性占用几位  
+
+###### Code属性
+
+存储Java方法体中的代码，接口或抽象类中的方法不存在Code属性。Code结构如下  
+|类型|名称|数量|含义|
+|--|--|--|--|
+|u2|attribute_name_index|1|常量固定为Code，标识该属性的属性名|
+|u4|attribute_length|1|属性的长度。为整个属性长度减6个字节|
+|u2|max_stack|1|操作数栈深度的最大值|
+|u2|max_locals|1|局部变量表所需的存储空间，单位为Slot。方法参数（包括this）、显示异常处理器的参数、方法体中定义的局部变量都需要使用局部变量表存放。Slot可以重用|
+|u4|code_length|1|字节码长度，理论上最大值可以达到232 - 1，但虚拟机规范中明确限制一个方法不允许超过65535条字节码指令|
+|u1|code|code_length|存储字节码指令的一系列字节流|
+|u2|exception_table_length|1|异常处理表数量|
+|exception_info|exception_table|exception_table_length|异常处理表，可以不存在|
+|u2|attributes_count|1||
+|attribute_info|attributs|attributes_count|
+
+![image.png](https://i.loli.net/2020/02/08/Tnsba9YdExg1m7z.png)  
+
+max_stack和max_locals很简单，没什么说的，接下来是2A B7 00 01 B1  
+
+- 2A：aload_0，将第0个Slot中为reference类型的本地变量推送到操作栈顶
+- B7：invokespecial，以栈顶的reference类型的数据所指向的对象作为方法接收者，调用此对象的实例构造器方法、private方法或者它的父类方法，后面跟着CONSTANT_Methodref_info类型常量。
+- 00 0A：invokespecial的参数
+- B1：return，方法结束
+
+依旧可以使用javap -verbose来查看计算后的字节码指令  
+![image.png](https://i.loli.net/2020/02/08/XRNmespQh2ijOk3.png)  
+其中locals和args_size都为1，而实际上源码中参数并没有，是因为自带的this关键字访问此方法所属对象，inc(TestClass this)与inc()的class文件是相同的。  
+异常处理表的格式4个类型为u2的属性，start_pc、end_pc、handler_pc、catch_type，表示当字节码在第start_pc到end_pc行之间出现类型为handler_pc或者其子类的异常，则转达第handler_pc行继续处理，当catch_type的值为0时，表示任意异常情况都需要转向到handler_pc处进行处理。  
+
+###### Exceptions属性
+
+与Code属性评级，是列举方法中可能抛出的受检异常，也就是throws关键字后面列举的异常  
+|类型|名称|数量|含义|
+|--|--|--|--|
+|u2|attribute_name_index|1|
+|u4|attribute_length|1|
+|u2|number_of_exceptions|1|可能抛出异常的数量|
+|u2|exception_index_table|number_of_exceptions|指向CONSTANT_Class_info型常量的索引，代表受检异常的类型|
+
+###### LineNumberTable属性
+
+Java源码行号与字节码偏移量之间对应的关系，可以再javac使用-g:none或-g:lines来设置是否生成，不生成的主要影响是异常堆栈不会显示出错行号  
+|类型|名称|数量|含义|
+|--|--|--|--|
+|u2|attribute_name_index|1|
+|u4|attribute_length|1|
+|u2|line_number_table_length|1|line_number_info的数量|
+|line_number_info|line_number_table|line_number_table_length|包含start_pc表示字节码行号，line_number表示Java源码行号|
+
+###### LocalVariableTable属性
+
+描述栈帧中局部变量表中的变量与Java源码中定义的变量之间的关系，可以通过javac的-g:none或-g:vars来取消生成，取消的影响是参数名称丢失，IDE会使用arg0之类的占位符代替。
+
+|类型|名称|数量|
+|--|--|--|
+|u2|attribute_name_index|1|
+|u4|attribute_length|1|
+|u2|local_variable_table_length|1|
+|local_variable_info|local_variable_table|local_variable_table_length|
+
+local_variable_info类型标识栈帧与源码中局部变量的关联  
+
+|类型|名称|数量|含义|
+|--|--|--|--|
+|u2|start_pc|1|局部变量声明周期开始的字节码偏移量|
+|u2|length|1|作用范围覆盖的长度|
+|u2|name_index|1|局部变量名称|
+|u2|descriptor_index|1|局部变量描述符|
+|u2|index|1|局部变量再栈帧局部变量表中Slot的位置，如果变量类型是64位时，占用Slot位index和index + 1两个|
+
+JDK1.5引入泛型后新增LocalVariableTypeTable，与LocalVariableTable类似，还只是把descriptor_index替换成Signature  
+
+###### SourceFile属性
+
+记录生成这个Class文件的源码文件名称，可以通过javac的-g:none或-g:source选项来取消生成，如果取消，在抛出异常时，堆栈不会显示代码所属文件名，对于大多数类来说没有问题，因为类名和文件名时一致的，但内部类等特殊类型不行。
+
+###### ConstantValue属性
+
+通知虚拟机自动为静态变量赋值，只有对被static关键字修饰的变量使用。对于非static类型的变量赋值是在实例构造器`<init>`方法中进行的，对于类变量，则有两种方式可以选择：在类构造器`<clinit>`方法中或者使用ConstantValue属性。在虚拟机规范中有ConstantValue属性的字段必须设置ACC_STATIC标志。从数据结构中，除了attribute_name_index和attribute_length外，还有u2类型的constantvalue_index，指向常量池一个字面量常量的引用，根据字段不同，字面值可以是CONSTANT_Long_info、CONSTANT_Float_info、CONSTANT_Double_info、CONSTANT_Integer_info、STONSTANT_String_info常量中的一个
+InnerClasses属性
+内部类与宿主类之间的关系，结构中还有1个u2类型的number_of_classes，number_of_class个inner Class_info类型的inner_class，其结构如下  
+
+|类型|名称|数量|含义|
+|--|--|--|--|
+|u2|inner_class_info_index|1|内部类符号引用|
+|u2|outer_class_info_index|1|宿主类符号引用|
+|u2|inner_name_index|1|指向常量池CONSTANT_Utf8_info类型的索引，如果匿名内部类则为0|
+|u2|inner_class_access_flags|1|内部类访问标志，类似于类的access_flags，范围如下结构。|  
+
+|标志名称|标志值|含义|
+|--|--|--|
+|ACC_PUBLIC|0x0001|是否为public|
+|ACC_PRIVATE|0x0002|是否为private|
+|ACC_PROTECTED|0x0004|是否为protected|
+|ACC_STATIC|0x0008|是否为static|
+|ACC_FINAL|0x0010|是否为final|
+|ACC_INTERFACE|0x0020|是否为synchronized|
+|ACC_ABSTRACT|0x0400|是否为abstract|
+|ACC_SYNTHETIC|0x1000|是否并非由用户代码产生的|
+|ACC_ANNOTATION|0x2000|是否是一个注解|
+|ACC_ENUM|0x4000|是否是一个枚举|  
+
+###### Deprecated及Synthetic属性
+
+标志类型的布尔属性，只存在有和没有，没有值的概念。Deprecated用于表示某个类、字段或方法已经被作者定为不再推荐使用，可以使用@deprecated注解；Synthetic属性代表此字段或者方法并不是Java源码直接生产，而是由编译器自行添加。
+
+###### StackMapTable属性
+
+一个复杂的变长属性，会在虚拟机类加载的字节码验证阶段被新类型检查器使用，在于代替之前比较消耗性能的基于数据流分析的类型推导验证器。包含零个或多个栈映射帧，显示或隐式代表一个字节码偏移量，用于表示执行该字节码时局部变量表和操作数栈的验证类型。类检查器会通过验证目标方法的局部变量和操作数栈需要的类型来确定一段字节码指令是否符合逻辑约束。
+
+###### Signature属性
+
+记录泛型签名信息，结构中有一个u2类型的signature_index，指向一个常量池的有效索引，为CONSTANT_Utf8_info结构，表示类签名、方法类型签名或字段类型名称
+
+###### BootstrapMethods属性
+
+保存invokedynamic指令引用的引导方法限定符。如果常量池出现过CONSTANT_InvokeDynamic_info类型常量，则必须存在明确的BootstrapMethods属性，且最多只有一个该属性。结构中还有一个u2的num_bootstrap_methods和num_bootstrap_methods个bootstrap_method类型的bootstrap_methods，其结构为  
+
+|类型|名称|数量|含义|
+|--|--|--|--|
+|u2|bootstrap_method_ref|1|指向常量池的有效索引，且为CONSTANT_MehtodHandle_info结构|
+|u2|num_bootstrap_argumengts|1|bootstrap_arguments[]数组成员的数量|
+|u2|bootstrap_arguments|num_bootstrap_arguments|对应常量池的索引，结构必须为COUNTSTANT_String_info、Class、Integer、Long、Float、Double、MethodHandle、MethodType之一|
