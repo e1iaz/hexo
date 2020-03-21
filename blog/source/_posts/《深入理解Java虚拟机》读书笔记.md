@@ -1289,3 +1289,50 @@ Java虚拟机采用的是操作数栈，即用一个字节长度代表特别操�
 ###### 运算指令
 
 在虚拟机中没有支持byte、short、char、boolean类型的算数运算，对于这类数据应使用int类型的指令代替。在除法和求余指令中出现出书为零，抛出ArithmeticException异常，其他运算不会。当long类型进行比较时，虚拟机采用带符号的比较凡是，浮点数比较采用无信号比较。
+
+###### 类型转换指令
+
+Java虚拟机直接支持宽化类型转换，即小范围转为大范围；窄化类型需要显式使用转换类型，同时可能会导致精度丢失、符号相反。里例如int窄化转换的时候，是直接抛弃前面的字节，而符号在最高位表示，高位被抛弃后，符号可能会就相反。
+
+###### 对象创建与访问指令
+
+不同类型的对象创建指令是不同的：  
+
+- 创建类实例：new
+- 创建数组：newarray、anewarray、multianewarray
+- 访问类字段和实例字段：newfield、putfield、getstatic、putstatic
+- 把一个数组元素加载到操作数栈：Taload
+- 将一个操作数栈的值存储到数组元素中：Tatore
+- 取数组长度：arraylength
+- 检查类实例类型：instanceof、checkcast
+
+|操作码|操作数|说明|
+|--|--|--|
+|newarray|atype|从栈中弹出数组长度，使用atype所指定的基本数据类型分配新数组，将数组对象引用压入栈|
+|anewarray|indextype1, indexbyte2|从栈中弹出数组长度，使用有indextype1和indexbyte2所指定的类分配新对象数组，将新数组的对象引用压入栈|
+|multianewarray|indextype1, indexbyte2, dimensions|从栈中弹出数组的维数，使用由indextype1和indexbyte2所指定的类分配新多维数组，将新数组的对象压入栈|
+
+###### 操作数栈管理指令
+
+- 将操作数栈的栈顶一个或两个元素出栈：pop、pop2
+- 复制栈顶一个或两个数值：dup、dup2.并将复制值或双份的复制值重新压入栈顶：dup_x1、dup2_x1、dup_x2、dup2_x2
+- 将栈顶两数值呼唤：swap
+
+###### 控制转移指令
+
+Java虚拟机中由专门的指令集来处理int和reference类型的条件分支比较操作，为了标识一个实体是否为null，也需要由指令判断是否为null。对于double、byte、char、short类型需要先转化为int；对于long、float、double会执行响应的比较运算指令，然后根据返回在操作数栈中的int值完成控制转移。  
+
+###### 方法调用和返回指令
+
+- invokevirtual用于调用对象的实例方法，根据对象的实际类型进行分派
+- invokeinterface用于调用接口方法，在运行时搜索一个实现这个接口方法的对象，找出适合的方法调用
+- invokespecial用于调用需要特殊处理的实例方法，包括初始化、私有方法、父类方法
+- invokestatic用于调用static方法
+- invokedynamic用于在运行时动态解析出调用点限定符引用的方法，并执行
+
+方法调用与数据类型无关，而方法返回指令是根据返回值的类型区分，Treturn。
+
+###### 同步指令
+
+方法级的同步是隐式的，是根据方法常量池中的ACC_SYNCHRONIZED访问标志得知是否标记。这个需要管程配合，如果设置了，线程会先成功持有管程，当运行结束时释放管程，任何线程都无法同时获取同一个管程，如果在执行机器发生异常且方法内部无法处理，则管程会在异常抛出同步方法时自动释放。  
+Java中的synchronized语句块，与Java虚拟机的指令集monitorenter和monitorexit对应。
